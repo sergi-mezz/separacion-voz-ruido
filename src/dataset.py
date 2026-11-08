@@ -6,7 +6,8 @@ from pathlib import Path
 
 import numpy as np
 
-from preprocessing import stft, magnitude_phase, SAMPLE_RATE, load_audio
+from utils import SAMPLE_RATE, load_audio
+from preprocessing import stft, magnitude_phase
 
 FREQ_BINS = 256
 SEGMENT_FRAMES = 256

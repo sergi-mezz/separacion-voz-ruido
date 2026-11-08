@@ -1,7 +1,8 @@
+"""Métricas objetivas de calidad e inteligibilidad de voz: SNR, SI-SDR, PESQ, STOI."""
 from __future__ import annotations
 import numpy as np
 
-from preprocessing import SAMPLE_RATE, match_length
+from utils import SAMPLE_RATE, match_length
 
 
 def snr(reference: np.ndarray, estimate: np.ndarray) -> float:
@@ -53,10 +54,12 @@ if __name__ == "__main__":
     import sys
     from pathlib import Path
     sys.path.insert(0, str(Path(__file__).resolve().parent))
-    from preprocessing import load_audio, match_length
+    from utils import load_audio, match_length
 
     root = Path(__file__).resolve().parents[1] / "data" / "raw" / "voicebank"
     clean_wavs = sorted((root / "clean_testset").glob("*.wav")) if (root / "clean_testset").exists() else []
+    if not clean_wavs:
+        raise SystemExit(f"Coloca WAV reales en {root} para ejecutar la prueba.")
     name0 = clean_wavs[0].name
     clean = load_audio(root / "clean_testset" / name0)
     noisy = load_audio(root / "noisy_testset" / name0)
