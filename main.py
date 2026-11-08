@@ -30,7 +30,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent / "src"))
 
 from utils import SAMPLE_RATE, load_audio, save_audio, match_length, ROOT, get_device
 from preprocessing import stft, istft, magnitude_phase, to_complex, log_magnitude
-from baseline import spectral_gating, spectral_subtraction
+from baseline import spectral_gating, spectral_subtraction, spectral_gating_nr
 from metrics import evaluate_all
 from dataset import pair_by_filename, FREQ_BINS
 
@@ -106,6 +106,7 @@ def evaluate_dataset(clean_dir, noisy_dir, checkpoint=None, model_name="unet",
         outputs = {
             "Ruidoso": noisy,
             "Compuerta (propia)": spectral_gating(noisy),
+            "Compuerta (noisereduce)": spectral_gating_nr(noisy, SAMPLE_RATE),
             "Sustraccion espectral": spectral_subtraction(noisy),
         }
         if model is not None:
