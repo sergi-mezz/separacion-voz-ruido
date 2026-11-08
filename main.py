@@ -4,6 +4,15 @@ Para cada par (limpio, ruidoso) calcula SNR, SI-SDR, PESQ y STOI de:
   - la señal ruidosa (entrada), el baseline clásico, y el modelo (si --checkpoint).
 Agrega promedios en un CSV, guarda audios de ejemplo y una figura comparativa.
 
+Ejemplos
+--------
+Solo baseline:
+    python main.py --clean data/raw/voicebank/clean_testset \
+        --noisy data/raw/voicebank/noisy_testset
+
+Baseline + modelo:
+    python main.py --clean ... --noisy ... \
+        --checkpoint experiments/unet_pairs/checkpoints/best.pt --model unet
 """
 from __future__ import annotations
 import argparse
@@ -19,7 +28,8 @@ import matplotlib.pyplot as plt
 # main.py vive en la raíz; añade src/ al path para importar los módulos.
 sys.path.insert(0, str(Path(__file__).resolve().parent / "src"))
 
-from preprocessing import stft, istft, magnitude_phase, to_complex, log_magnitude, SAMPLE_RATE, load_audio, save_audio, match_length, ROOT, get_device
+from utils import SAMPLE_RATE, load_audio, save_audio, match_length, ROOT, get_device
+from preprocessing import stft, istft, magnitude_phase, to_complex, log_magnitude
 from baseline import spectral_gating, spectral_subtraction
 from metrics import evaluate_all
 from dataset import pair_by_filename, FREQ_BINS
@@ -56,6 +66,10 @@ def load_model(checkpoint, model_name, device):
         from models.autoencoder import ConvAutoencoder as M
     elif model_name == "ae_strided":
         from models.autoencoder_strided import ConvAutoencoderStrided as M
+    elif model_name == "unet_noskip":
+        from models.unet import UNetNoSkip as M
+    else:
+        from models.unet import UNet as M
     model = M().to(device)
     state = torch.load(checkpoint, map_location=device)
     model.load_state_dict(state["model"])
@@ -63,7 +77,7 @@ def load_model(checkpoint, model_name, device):
     return model
 
 
-def evaluate_dataset(clean_dir, noisy_dir, checkpoint=None, model_name="ae",
+def evaluate_dataset(clean_dir, noisy_dir, checkpoint=None, model_name="unet",
                      limit=None, n_examples=3, out_dir=None, tag=""):
     pairs = pair_by_filename(clean_dir, noisy_dir)
     if not pairs:
@@ -111,8 +125,8 @@ def evaluate_dataset(clean_dir, noisy_dir, checkpoint=None, model_name="ae",
             for name, est in outputs.items():
                 if name == "Ruidoso":
                     continue
-                tag = name.lower().replace(" ", "_").replace("ó", "o")
-                save_audio(ex / f"{i:02d}_{tag}.wav", est[:len(clean)])
+                nombre = name.lower().replace(" ", "_").replace("ó", "o")
+                save_audio(ex / f"{i:02d}_{nombre}.wav", est[:len(clean)])
             saved_examples.append((clean, outputs))
         if (i + 1) % 25 == 0:
             print(f"  procesados {i+1}/{len(pairs)}")
@@ -143,7 +157,7 @@ def main():
     ap.add_argument("--clean", required=True)
     ap.add_argument("--noisy", required=True)
     ap.add_argument("--checkpoint", default=None)
-    ap.add_argument("--model", choices=["ae", "ae_strided"], default="ae")
+    ap.add_argument("--model", choices=["ae", "ae_strided", "unet", "unet_noskip"], default="unet")
     ap.add_argument("--limit", type=int, default=None)
     ap.add_argument("--n-examples", type=int, default=3)
     ap.add_argument("--tag", default="",
