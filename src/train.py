@@ -10,6 +10,9 @@ VoiceBank (pares ya construidos):
 
 Pérdida combinada MSE + SI-SDR (experimento con la U-Net; ver src/losses.py):
     python src/train.py ... --model unet --loss mse_sisdr --lambda-sisdr 0.001 --exp-name unet_mse_sisdr
+
+Con --log-grad-norm se guarda la norma del gradiente de cada paso, antes del recorte
+(experiments/<exp>/grad_norms.npy); la resume src/norma_gradiente.py.
 """
 from __future__ import annotations
 import argparse
@@ -17,6 +20,7 @@ import json
 import time
 from pathlib import Path
 
+import numpy as np
 import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
@@ -45,6 +49,9 @@ def _raise_fd_limit(target: int = 8192) -> None:
         pass
 
 
+MAX_GRAD_NORM = 5.0   # norma máxima del gradiente (recorte)
+
+
 def build_model(name: str) -> nn.Module:
     if name == "ae":
         from models.autoencoder import ConvAutoencoder
@@ -70,9 +77,10 @@ def get_loss(name: str, lam: float = 1e-3):
     return {"mse": nn.MSELoss(), "l1": nn.L1Loss()}[name]
 
 
-def run_epoch(model, loader, loss_fn, device, optimizer=None):
+def run_epoch(model, loader, loss_fn, device, optimizer=None, grad_norms=None):
     """Devuelve (pérdida media, MSE media, SI-SDR medio). Las dos últimas solo se calculan
-    con la pérdida combinada; con MSE o L1 valen None."""
+    con la pérdida combinada; con MSE o L1 valen None. Si se pasa la lista grad_norms, se
+    le agrega la norma del gradiente de cada paso, medida antes del recorte."""
     train = optimizer is not None
     model.train() if train else model.eval()
     combined = hasattr(loss_fn, "istft")
@@ -91,7 +99,9 @@ def run_epoch(model, loader, loss_fn, device, optimizer=None):
             if train:
                 optimizer.zero_grad()
                 loss.backward()
-                torch.nn.utils.clip_grad_norm_(model.parameters(), 5.0)
+                norm = torch.nn.utils.clip_grad_norm_(model.parameters(), MAX_GRAD_NORM)
+                if grad_norms is not None:
+                    grad_norms.append(norm.item())
                 optimizer.step()
             total += loss.item() * x.size(0)
             count += x.size(0)
@@ -117,6 +127,8 @@ def main():
     ap.add_argument("--num-workers", type=int, default=2)
     ap.add_argument("--seed", type=int, default=42)
     ap.add_argument("--exp-name", default=None)
+    ap.add_argument("--log-grad-norm", action="store_true",
+                    help="guarda la norma del gradiente de cada paso, antes del recorte")
     args = ap.parse_args()
 
     set_seed(args.seed)
@@ -162,11 +174,12 @@ def main():
     (ROOT / "results" / "figures").mkdir(parents=True, exist_ok=True)
 
     history = {"train": [], "val": [], "val_mse": [], "val_sisdr": [], "seg_por_epoca": []}
+    grad_norms = [] if args.log_grad_norm else None
     best_val = float("inf")
     for epoch in range(1, args.epochs + 1):
         t0 = time.time()
         train_ds.set_epoch(epoch)   # nuevo recorte aleatorio en esta época
-        tr, _, _ = run_epoch(model, train_loader, loss_fn, device, optimizer)
+        tr, _, _ = run_epoch(model, train_loader, loss_fn, device, optimizer, grad_norms)
         va, va_mse, va_sdr = run_epoch(model, val_loader, loss_fn, device, None)
         scheduler.step(va)
         history["train"].append(tr); history["val"].append(va)
@@ -181,6 +194,11 @@ def main():
         extra = f"  [val MSE {va_mse:.5f}  val SI-SDR {va_sdr:.2f} dB]" if va_sdr is not None else ""
         print(f"Época {epoch:03d}/{args.epochs}  train {tr:.5f}  val {va:.5f}{extra}  "
               f"({time.time()-t0:.1f}s){flag}")
+        if grad_norms is not None:
+            g = np.asarray(grad_norms[-len(train_loader):])
+            print(f"           norma del gradiente: mediana {np.median(g):.3f}  máx {g.max():.3f}  "
+                  f"recortados {int((g > MAX_GRAD_NORM).sum())}/{g.size}")
+            np.save(exp_dir / "grad_norms.npy", np.asarray(grad_norms, dtype=np.float32))
 
     torch.save({"model": model.state_dict(), "args": vars(args), "epoch": args.epochs},
                exp_dir / "checkpoints" / "last.pt")
